@@ -1,0 +1,103 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploys Step Function - Runs on Schedule
+
+Parameters:
+  pStepFunctionName:
+    Description: Name of Step Function
+    Type: String
+    AllowedPattern: "^[0-9a-zA-Z]+([0-9a-zA-Z-]*[0-9a-zA-Z])*$"
+
+  pEventScheduleCronExpression:
+    Description: Cron Expression - When to Execute Step Function
+    Type: String
+    Default: cron(0 12 ? * 3 *)
+
+
+Resources:
+  # EventBridge Execution Role - Allow EventBridge to Execute Step Function
+  rEventBridgeExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - events.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      RoleName: !Sub EventBridge-ExecutionRole-${pStepFunctionName}-${AWS::Region}
+      Description: !Sub EventBridge execution role for ${pStepFunctionName}
+      Policies:
+      - PolicyName: !Ref pStepFunctionName
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - states:StartExecution
+            Resource: !Sub arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:${pStepFunctionName}
+
+  # Step Functions Execution Role - Allow Step Functions to Perform Specific Actions
+  rStepFunctionsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - states.amazonaws.com
+          Action:
+          - sts:AssumeRole
+      Path: "/"
+      RoleName: !Sub StepFunctions-ExecutionRole-${pStepFunctionName}-${AWS::Region}
+      Description: !Sub Step Functions execution role for ${pStepFunctionName}
+      ManagedPolicyArns:
+        - ### AWS MANAGED POLICY ARN GOES HERE ###
+      Policies:
+      - PolicyName: XRayAccessPolicy-Default
+        PolicyDocument:
+          Version: '2012-10-17'
+          Statement:
+          - Effect: Allow
+            Action:
+            - xray:PutTraceSegments
+            - xray:PutTelemetryRecords
+            - xray:GetSamplingRules
+            - xray:GetSamplingTargets
+            Resource: '*'
+
+  # EventBridge Event Rule - Execute Step Function on a Schedule
+  rEventBridgeEventRule1:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: !Sub Execute Step Function - ${pStepFunctionName}
+      Name: !Ref pStepFunctionName
+      ScheduleExpression: !Ref pEventScheduleCronExpression
+      State: ENABLED
+      Targets: 
+        - Arn: !GetAtt rStateMachine1.Arn # State Machine to Execute
+          Id: !Ref pStepFunctionName
+          RoleArn: !GetAtt rEventBridgeExecutionRole.Arn # EventBridge Execution Role
+
+  # Create Step Functions State Machine
+  rStateMachine1:
+    Type: AWS::StepFunctions::StateMachine
+    Properties:
+      RoleArn: !GetAtt rStepFunctionsExecutionRole.Arn # Step Functions Execution Role
+      StateMachineName: !Ref pStepFunctionName
+      DefinitionString: !Sub |
+        {
+        "Comment": "State Machine",
+        "StartAt": "Pass",
+        "States": {
+            "Pass": {
+            "Type": "Pass",
+            "End": true
+            }
+        }
+        }
