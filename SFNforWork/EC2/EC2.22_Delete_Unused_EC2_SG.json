@@ -1,0 +1,363 @@
+{
+    "Comment": "A description of my state machine",
+    "StartAt": "DescribeSecurityGroups",
+    "States": {
+      "DescribeSecurityGroups": {
+        "Type": "Task",
+        "Next": "ForEachSecurityGroup",
+        "Parameters": {},
+        "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroups",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Check Error"
+          }
+        ]
+      },
+      "Check Error": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.Cause",
+            "StringEquals": "*not authorized*",
+            "Next": "Acess Denied"
+          }
+        ],
+        "Default": "CatchAll"
+      },
+      "Acess Denied": {
+        "Type": "Fail"
+      },
+      "CatchAll": {
+        "Type": "Fail"
+      },
+      "ForEachSecurityGroup": {
+        "Type": "Map",
+        "Iterator": {
+          "StartAt": "CreateTagsFalse",
+          "States": {
+            "CreateTagsFalse": {
+              "Type": "Task",
+              "Parameters": {
+                "Resources.$": "States.Array($.GroupId)",
+                "Tags": [
+                  {
+                    "Key": "InUse",
+                    "Value": "False"
+                  }
+                ]
+              },
+              "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+              "Next": "DescribeNetworkInterfaces",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "Check Erro in ForEach SG"
+                }
+              ]
+            },
+            "Check Erro in ForEach SG": {
+              "Type": "Choice",
+              "Choices": [
+                {
+                  "Variable": "$.Cause",
+                  "StringMatches": "*not authorized*",
+                  "Next": "Access Denied"
+                }
+              ],
+              "Default": "Catch All"
+            },
+            "Access Denied": {
+              "Type": "Fail"
+            },
+            "Catch All": {
+              "Type": "Fail"
+            },
+            "DescribeNetworkInterfaces": {
+              "Type": "Task",
+              "Parameters": {},
+              "Resource": "arn:aws:states:::aws-sdk:ec2:describeNetworkInterfaces",
+              "Next": "ForEachElasticNetworkInterface",
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "Check Erro in ForEach SG"
+                }
+              ]
+            },
+            "ForEachElasticNetworkInterface": {
+              "Type": "Map",
+              "Iterator": {
+                "StartAt": "Is Group Present",
+                "States": {
+                  "Is Group Present": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.Groups",
+                        "IsPresent": true,
+                        "Next": "ForEach Group"
+                      }
+                    ],
+                    "Default": "Success (1)"
+                  },
+                  "ForEach Group": {
+                    "Type": "Map",
+                    "Iterator": {
+                      "StartAt": "CreateTags",
+                      "States": {
+                        "CreateTags": {
+                          "Type": "Task",
+                          "Parameters": {
+                            "Resources.$": "States.Array($.GroupId)",
+                            "Tags": [
+                              {
+                                "Key": "InUse",
+                                "Value": "True"
+                              }
+                            ]
+                          },
+                          "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+                          "End": true,
+                          "Catch": [
+                            {
+                              "ErrorEquals": [
+                                "States.ALL"
+                              ],
+                              "Next": "Error Check in for Each Tag"
+                            }
+                          ]
+                        },
+                        "Error Check in for Each Tag": {
+                          "Type": "Choice",
+                          "Choices": [
+                            {
+                              "Variable": "$.Cause",
+                              "StringEquals": "*not authorized*",
+                              "Next": "Access Denied Create Tags"
+                            }
+                          ],
+                          "Default": "Catch All Create Tags"
+                        },
+                        "Access Denied Create Tags": {
+                          "Type": "Fail"
+                        },
+                        "Catch All Create Tags": {
+                          "Type": "Fail"
+                        }
+                      }
+                    },
+                    "End": true,
+                    "ItemsPath": "$.Groups"
+                  },
+                  "Success (1)": {
+                    "Type": "Succeed"
+                  }
+                }
+              },
+              "ItemsPath": "$.NetworkInterfaces",
+              "End": true,
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "Check Erro in ForEach SG"
+                }
+              ]
+            }
+          }
+        },
+        "ItemsPath": "$.SecurityGroups",
+        "Next": "DescribeSecurityGroupsForDeletion",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Check Error"
+          }
+        ]
+      },
+      "DescribeSecurityGroupsForDeletion": {
+        "Type": "Task",
+        "Parameters": {},
+        "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroups",
+        "Next": "ForEachSG",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Check Error"
+          }
+        ]
+      },
+      "ForEachSG": {
+        "Type": "Map",
+        "End": true,
+        "Iterator": {
+          "StartAt": "ForEachTag",
+          "States": {
+            "ForEachTag": {
+              "Type": "Map",
+              "Iterator": {
+                "StartAt": "Is Key InUse and Value False",
+                "States": {
+                  "Is Key InUse and Value False": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "And": [
+                          {
+                            "Variable": "$.Key",
+                            "StringEquals": "InUse"
+                          },
+                          {
+                            "Variable": "$.Value",
+                            "StringEquals": "False"
+                          }
+                        ],
+                        "Next": "Is The Group name Default?"
+                      }
+                    ],
+                    "Default": "DeleteTags"
+                  },
+                  "DeleteTags": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "Resources.$": "States.Array($.GroupId)",
+                      "Tags": [
+                        {
+                          "Key": "InUse",
+                          "Value": "True"
+                        }
+                      ]
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:deleteTags",
+                    "End": true,
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "ErrorCheck in ForEachTagLoop"
+                      }
+                    ]
+                  },
+                  "ErrorCheck in ForEachTagLoop": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Variable": "$.Cause",
+                        "StringMatches": "*not authorized*",
+                        "Next": "Access Denied In ForEachTag loop"
+                      }
+                    ],
+                    "Default": "Catch All in ForEachTag loop"
+                  },
+                  "Access Denied In ForEachTag loop": {
+                    "Type": "Fail"
+                  },
+                  "Catch All in ForEachTag loop": {
+                    "Type": "Fail"
+                  },
+                  "Is The Group name Default?": {
+                    "Type": "Choice",
+                    "Choices": [
+                      {
+                        "Or": [
+                          {
+                            "Variable": "$.GroupName",
+                            "StringEquals": "Default"
+                          },
+                          {
+                            "Variable": "$.GroupName",
+                            "StringEquals": "default"
+                          }
+                        ],
+                        "Next": "DeleteTags (1)"
+                      }
+                    ],
+                    "Default": "DeleteSecurityGroup"
+                  },
+                  "DeleteTags (1)": {
+                    "Type": "Task",
+                    "Parameters": {
+                      "Resources.$": "States.Array($.GroupId)",
+                      "Tags": [
+                        {
+                          "Key": "InUse",
+                          "Value": "False"
+                        }
+                      ]
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:deleteTags",
+                    "End": true,
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "ErrorCheck in ForEachTagLoop"
+                      }
+                    ]
+                  },
+                  "DeleteSecurityGroup": {
+                    "Type": "Task",
+                    "End": true,
+                    "Parameters": {
+                      "GroupId.$": "$.GroupId"
+                    },
+                    "Resource": "arn:aws:states:::aws-sdk:ec2:deleteSecurityGroup",
+                    "Catch": [
+                      {
+                        "ErrorEquals": [
+                          "States.ALL"
+                        ],
+                        "Next": "ErrorCheck in ForEachTagLoop"
+                      }
+                    ]
+                  }
+                }
+              },
+              "End": true,
+              "ItemsPath": "$.Tags",
+              "Parameters": {
+                "Key.$": "$.Tags[0].Key",
+                "Value.$": "$.Tags[0].Value",
+                "GroupId.$": "$.GroupId",
+                "GroupName.$": "$.GroupName"
+              },
+              "Catch": [
+                {
+                  "ErrorEquals": [
+                    "States.ALL"
+                  ],
+                  "Next": "Catch All in ForEachSg Loop"
+                }
+              ]
+            },
+            "Catch All in ForEachSg Loop": {
+              "Type": "Fail"
+            }
+          }
+        },
+        "ItemsPath": "$.SecurityGroups",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Check Error"
+          }
+        ]
+      }
+    }
+  }

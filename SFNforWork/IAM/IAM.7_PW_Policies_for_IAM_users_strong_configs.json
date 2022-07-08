@@ -1,0 +1,127 @@
+{
+    "Comment": "A description of my state machine",
+    "StartAt": "GetAccountPasswordPolicy",
+    "States": {
+      "GetAccountPasswordPolicy": {
+        "Type": "Task",
+        "Next": "Change Required?",
+        "Parameters": {},
+        "Resource": "arn:aws:states:::aws-sdk:iam:getAccountPasswordPolicy",
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Error Check",
+            "Comment": "Unable To Find Password Policy"
+          }
+        ]
+      },
+      "Change Required?": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Or": [
+              {
+                "Not": {
+                  "Variable": "$.PasswordPolicy.RequireLowercaseCharacters",
+                  "BooleanEquals": true
+                }
+              },
+              {
+                "Not": {
+                  "Variable": "$.PasswordPolicy.MinimumPasswordLength",
+                  "NumericGreaterThanEquals": 8
+                }
+              },
+              {
+                "Not": {
+                  "Variable": "$.PasswordPolicy.RequireSymbols",
+                  "BooleanEquals": true
+                }
+              },
+              {
+                "Not": {
+                  "Variable": "$.PasswordPolicy.RequireNumbers",
+                  "BooleanEquals": true
+                }
+              },
+              {
+                "Not": {
+                  "Variable": "$.PasswordPolicy.RequireUppercaseCharacters",
+                  "BooleanEquals": true
+                }
+              }
+            ],
+            "Next": "UpdateAccountPasswordPolicy"
+          }
+        ],
+        "Default": "No Change Required"
+      },
+      "No Change Required": {
+        "Type": "Succeed"
+      },
+      "UpdateAccountPasswordPolicy": {
+        "Type": "Task",
+        "Parameters": {
+          "RequireUppercaseCharacters": true,
+          "RequireLowercaseCharacters": true,
+          "RequireSymbols": true,
+          "RequireNumbers": true,
+          "MinimumPasswordLength": 8
+        },
+        "Resource": "arn:aws:states:::aws-sdk:iam:updateAccountPasswordPolicy",
+        "End": true,
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Error Check"
+          }
+        ]
+      },
+      "Error Check": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Variable": "$.Error",
+            "StringEquals": "Iam.NoSuchEntityException",
+            "Next": "CreateAccountPasswordPolicy"
+          },
+          {
+            "Variable": "$.Cause",
+            "StringMatches": "*not authorized*",
+            "Next": "Access Denied"
+          }
+        ],
+        "Default": "Catch All"
+      },
+      "Catch All": {
+        "Type": "Fail"
+      },
+      "CreateAccountPasswordPolicy": {
+        "Type": "Task",
+        "Parameters": {
+          "RequireUppercaseCharacters": true,
+          "RequireLowercaseCharacters": true,
+          "RequireSymbols": true,
+          "RequireNumbers": true,
+          "MinimumPasswordLength": 8
+        },
+        "Resource": "arn:aws:states:::aws-sdk:iam:updateAccountPasswordPolicy",
+        "End": true,
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.ALL"
+            ],
+            "Next": "Error Check"
+          }
+        ]
+      },
+      "Access Denied": {
+        "Type": "Fail"
+      }
+    }
+  }

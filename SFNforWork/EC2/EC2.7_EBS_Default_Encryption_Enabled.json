@@ -1,0 +1,66 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "GetEbsEncryptionByDefault",
+  "States": {
+    "GetEbsEncryptionByDefault": {
+      "Type": "Task",
+      "Next": "Check if EbsEncryptionByDefault is false",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:getEbsEncryptionByDefault",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Check if EbsEncryptionByDefault is false": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.EbsEncryptionByDefault",
+          "BooleanEquals": false,
+          "Next": "EnableEbsEncryptionByDefault"
+        }
+      ],
+      "Default": "No Change Needed"
+    },
+    "No Change Needed": {
+      "Type": "Succeed"
+    },
+    "EnableEbsEncryptionByDefault": {
+      "Type": "Task",
+      "End": true,
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:enableEbsEncryptionByDefault",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Comment": "Any Error",
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "Catch All": {
+      "Type": "Fail"
+    }
+  }
+}

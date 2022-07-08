@@ -1,0 +1,105 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeInstances",
+  "States": {
+    "DescribeInstances": {
+      "Type": "Task",
+      "Next": "ForEach EC2 Instance",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeInstances",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "Catch All": {
+      "Type": "Fail"
+    },
+    "ForEach EC2 Instance": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "MetadataOption set to True?",
+        "States": {
+          "MetadataOption set to True?": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Instances[0].MetadataOptions.HttpTokens",
+                "StringEquals": "required",
+                "Next": "No Change Needed"
+              }
+            ],
+            "Default": "ModifyInstanceMetadataOptions"
+          },
+          "No Change Needed": {
+            "Type": "Succeed"
+          },
+          "ModifyInstanceMetadataOptions": {
+            "Type": "Task",
+            "Parameters": {
+              "InstanceId.$": "$.Instances[0].InstanceId",
+              "HttpTokens": "required"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifyInstanceMetadataOptions",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Comment": "OnError",
+                "Next": "Error Check in ForEach Loop"
+              }
+            ],
+            "ResultPath": "$.modifyinstancemetadataoptionsresult",
+            "End": true
+          },
+          "Error Check in ForEach Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in ForEach instance loop"
+              }
+            ],
+            "Default": "Catch All in ForEachInstance Loop"
+          },
+          "Access Denied in ForEach instance loop": {
+            "Type": "Fail"
+          },
+          "Catch All in ForEachInstance Loop": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "End": true,
+      "ItemsPath": "$.Reservations",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Catch All"
+        }
+      ]
+    }
+  }
+}

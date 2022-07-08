@@ -1,0 +1,197 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeSecurityGroups",
+  "States": {
+    "DescribeSecurityGroups": {
+      "Type": "Task",
+      "Next": "LoopThroughSGsToFindDefaultSG(s)",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroups",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "LoopThroughSGsToFindDefaultSG(s)": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "IfGroupnameDefault",
+        "States": {
+          "IfGroupnameDefault": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Or": [
+                  {
+                    "Variable": "$.GroupName",
+                    "StringEquals": "default"
+                  },
+                  {
+                    "Variable": "$.GroupName",
+                    "StringEquals": "Default"
+                  }
+                ],
+                "Next": "DescribeSecurityGroupRules"
+              }
+            ],
+            "Default": "Success"
+          },
+          "DescribeSecurityGroupRules": {
+            "Type": "Task",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "group-id",
+                  "Values.$": "States.Array($.GroupId)"
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroupRules",
+            "ResultPath": "$.GroupRulesResult",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Error Check in SG Loop"
+              }
+            ],
+            "Next": "ForEach SG Rule"
+          },
+          "Error Check in SG Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in SG Loop"
+              }
+            ],
+            "Default": "Catch All in SG Loop"
+          },
+          "Access Denied in SG Loop": {
+            "Type": "Fail"
+          },
+          "Catch All in SG Loop": {
+            "Type": "Fail"
+          },
+          "ForEach SG Rule": {
+            "Type": "Map",
+            "Iterator": {
+              "StartAt": "Is the rule egress?",
+              "States": {
+                "Is the rule egress?": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.IsEgress",
+                      "BooleanEquals": true,
+                      "Next": "RevokeSecurityGroupEgress"
+                    }
+                  ],
+                  "Default": "RevokeSecurityGroupIngress"
+                },
+                "RevokeSecurityGroupEgress": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "GroupId.$": "$.GroupId",
+                    "SecurityGroupRuleIds.$": "States.Array($.SecurityGroupRuleId)"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:ec2:revokeSecurityGroupEgress",
+                  "End": true,
+                  "Catch": [
+                    {
+                      "ErrorEquals": [
+                        "States.ALL"
+                      ],
+                      "Next": "Error Check in SG Rule Loop"
+                    }
+                  ]
+                },
+                "Error Check in SG Rule Loop": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.Cause",
+                      "StringMatches": "*not authorized*",
+                      "Next": "Access Denied in ForEach SG Rule Looop"
+                    }
+                  ],
+                  "Default": "Catch All in ForEach SG Rule Looop"
+                },
+                "Access Denied in ForEach SG Rule Looop": {
+                  "Type": "Fail"
+                },
+                "Catch All in ForEach SG Rule Looop": {
+                  "Type": "Fail"
+                },
+                "RevokeSecurityGroupIngress": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "GroupId.$": "$.GroupId",
+                    "SecurityGroupRuleIds.$": "States.Array($.SecurityGroupRuleId)"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:ec2:revokeSecurityGroupIngress",
+                  "ResultPath": "$.RevokeIngressResult",
+                  "Catch": [
+                    {
+                      "ErrorEquals": [
+                        "States.ALL"
+                      ],
+                      "Next": "Error Check in SG Rule Loop"
+                    }
+                  ],
+                  "End": true
+                }
+              }
+            },
+            "ItemsPath": "$.GroupRulesResult.SecurityGroupRules",
+            "End": true,
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Catch All in SG Loop"
+              }
+            ]
+          },
+          "Success": {
+            "Type": "Succeed"
+          }
+        }
+      },
+      "ItemsPath": "$.SecurityGroups",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Catch All"
+        }
+      ]
+    },
+    "Catch All": {
+      "Type": "Fail"
+    }
+  }
+}

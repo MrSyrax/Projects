@@ -1,0 +1,256 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "Is NextToken Present in input?",
+  "States": {
+    "Is NextToken Present in input?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.NextToken",
+          "IsPresent": true,
+          "Next": "DescribeSnapshots If NextToken Is Present"
+        }
+      ],
+      "Default": "Necessary Input"
+    },
+    "DescribeSnapshots If NextToken Is Present": {
+      "Type": "Task",
+      "Next": "Is NextToken Present??",
+      "Parameters": {
+        "MaxResults": 5,
+        "OwnerIds.$": "States.Array($.OwnerIds)",
+        "NextToken.$": "$.NextToken"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeSnapshots",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorCheck"
+        }
+      ]
+    },
+    "Is NextToken Present??": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.NextToken",
+          "IsPresent": true,
+          "Next": "Step Functions StartExecution second caller"
+        }
+      ],
+      "Default": "ForEachSnapshot"
+    },
+    "Necessary Input": {
+      "Type": "Pass",
+      "Next": "DescribeSnapshots",
+      "Result": {
+        "OwnerIds": "self"
+      }
+    },
+    "DescribeSnapshots": {
+      "Type": "Task",
+      "Parameters": {
+        "MaxResults": 5,
+        "OwnerIds.$": "States.Array($.OwnerIds)"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeSnapshots",
+      "Next": "Is NextToken Present?",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorCheck"
+        }
+      ]
+    },
+    "Is NextToken Present?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.NextToken",
+          "IsPresent": true,
+          "Next": "Step Functions StartExecution"
+        }
+      ],
+      "Default": "ForEachSnapshot"
+    },
+    "Step Functions StartExecution": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution",
+      "Parameters": {
+        "StateMachineArn": "arn:aws:states:us-west-2:966151963185:stateMachine:PrivateEBSSnapShots",
+        "Input": {
+          "NextToken.$": "$.NextToken",
+          "OwnerIds": "self",
+          "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+        }
+      },
+      "Next": "ForEachSnapshot",
+      "ResultPath": "$.SfnExecResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorCheck"
+        }
+      ]
+    },
+    "Step Functions StartExecution second caller": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::states:startExecution",
+      "Parameters": {
+        "StateMachineArn": "arn:aws:states:us-west-2:966151963185:stateMachine:PrivateEBSSnapShots",
+        "Input": {
+          "NextToken.$": "$.NextToken",
+          "OwnerIds": "self",
+          "AWS_STEP_FUNCTIONS_STARTED_BY_EXECUTION_ID.$": "$$.Execution.Id"
+        }
+      },
+      "Next": "ForEachSnapshot",
+      "ResultPath": "$.SfnExecResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorCheck"
+        }
+      ]
+    },
+    "ErrorCheck": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "AccessDeniedDSS"
+        }
+      ],
+      "Default": "Catch all"
+    },
+    "AccessDeniedDSS": {
+      "Type": "Fail"
+    },
+    "Catch all": {
+      "Type": "Fail"
+    },
+    "ForEachSnapshot": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "DescribeSnapshotAttribute",
+        "States": {
+          "DescribeSnapshotAttribute": {
+            "Type": "Task",
+            "Parameters": {
+              "Attribute": "createVolumePermission",
+              "SnapshotId.$": "$.SnapshotId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeSnapshotAttribute",
+            "Next": "Check If Volume Permission Group Exists",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in Loop",
+                "Comment": "UnableToDescribeAttribute"
+              }
+            ],
+            "ResultSelector": {
+              "CreateVolumePermissions.$": "$.CreateVolumePermissions",
+              "SnapshotId.$": "$.SnapshotId",
+              "GroupNames": "all"
+            }
+          },
+          "ErrorCheck in Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "AccessDenied"
+              }
+            ],
+            "Default": "Catch All In ForEachSnapShot"
+          },
+          "AccessDenied": {
+            "Type": "Fail"
+          },
+          "Check If Volume Permission Group Exists": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.CreateVolumePermissions[0].Group",
+                "IsPresent": true,
+                "Next": "ModifySnapshotAttribute"
+              }
+            ],
+            "Default": "Nothing To change"
+          },
+          "Nothing To change": {
+            "Type": "Succeed"
+          },
+          "Catch All In ForEachSnapShot": {
+            "Type": "Fail"
+          },
+          "ModifySnapshotAttribute": {
+            "Type": "Task",
+            "Parameters": {
+              "SnapshotId.$": "$.SnapshotId",
+              "Attribute": "createVolumePermission",
+              "OperationType": "remove",
+              "GroupNames.$": "States.Array($.GroupNames)"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifySnapshotAttribute",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in Loop"
+              }
+            ],
+            "Next": "CreateTags",
+            "ResultPath": "$.SnapshotAttributeResult"
+          },
+          "CreateTags": {
+            "Type": "Task",
+            "End": true,
+            "Parameters": {
+              "Resources.$": "States.Array($.SnapshotId)",
+              "Tags": [
+                {
+                  "Key": "Private",
+                  "Value": "True"
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createTags",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in Loop"
+              }
+            ]
+          }
+        }
+      },
+      "End": true,
+      "ItemsPath": "$.Snapshots",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "ErrorCheck"
+        }
+      ]
+    }
+  }
+}

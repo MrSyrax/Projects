@@ -1,0 +1,105 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeSubnets",
+  "States": {
+    "DescribeSubnets": {
+      "Type": "Task",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeSubnets",
+      "Next": "ForEach Subnet",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "Catch All": {
+      "Type": "Fail"
+    },
+    "ForEach Subnet": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "Is MapPublicIpOnLaunch set to false?",
+        "States": {
+          "Is MapPublicIpOnLaunch set to false?": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.MapPublicIpOnLaunch",
+                "BooleanEquals": false,
+                "Next": "No Change Needed"
+              }
+            ],
+            "Default": "ModifySubnetAttribute"
+          },
+          "No Change Needed": {
+            "Type": "Succeed"
+          },
+          "ModifySubnetAttribute": {
+            "Type": "Task",
+            "Parameters": {
+              "SubnetId.$": "$.SubnetId",
+              "MapPublicIpOnLaunch": {
+                "Value": "False"
+              }
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:modifySubnetAttribute",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Error Check in ForEach Subnet Loop"
+              }
+            ],
+            "End": true
+          },
+          "Error Check in ForEach Subnet Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in ForEach Subnet Loop"
+              }
+            ],
+            "Default": "Catch All in ForEach Subnet Loop"
+          },
+          "Access Denied in ForEach Subnet Loop": {
+            "Type": "Fail"
+          },
+          "Catch All in ForEach Subnet Loop": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "ItemsPath": "$.Subnets",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Catch All"
+        }
+      ]
+    }
+  }
+}

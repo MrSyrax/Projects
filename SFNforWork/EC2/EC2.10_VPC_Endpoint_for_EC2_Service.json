@@ -1,0 +1,230 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeVpcs",
+  "States": {
+    "DescribeVpcs": {
+      "Type": "Task",
+      "Next": "ForEachVPC",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeVpcs",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Checker"
+        }
+      ]
+    },
+    "Error Checker": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Acess Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Acess Denied": {
+      "Type": "Fail"
+    },
+    "Catch All": {
+      "Type": "Fail"
+    },
+    "ForEachVPC": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "DescribeVpcEndpoints",
+        "States": {
+          "DescribeVpcEndpoints": {
+            "Type": "Task",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "vpc-id",
+                  "Values.$": "States.Array($.VpcId)"
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeVpcEndpoints",
+            "Next": "HasEndpoints?",
+            "ResultPath": "$.DescribeVpcEndpoints",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in ForEachVpc Loop"
+              }
+            ]
+          },
+          "ErrorCheck in ForEachVpc Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in ForEachVPC Loop"
+              }
+            ],
+            "Default": "Catch all in ForEachVPC loop"
+          },
+          "Access Denied in ForEachVPC Loop": {
+            "Type": "Fail"
+          },
+          "HasEndpoints?": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Not": {
+                  "Variable": "$.DescribeVpcEndpoints.VpcEndpoints[0].CreationTimestamp",
+                  "IsPresent": true
+                },
+                "Next": "DescribeVpcEndpointServices"
+              }
+            ],
+            "Default": "ForeachEndpoint"
+          },
+          "Catch all in ForEachVPC loop": {
+            "Type": "Fail"
+          },
+          "DescribeVpcEndpointServices": {
+            "Type": "Task",
+            "Next": "CreateVpcEndpoint",
+            "Parameters": {},
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeVpcEndpointServices",
+            "ResultSelector": {
+              "vpce.$": "$.ServiceNames[?(@ =~ /.*ec2$/i)]"
+            },
+            "ResultPath": "$.DescribeVpcEndpointServicesResult",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in ForEachVpc Loop"
+              }
+            ]
+          },
+          "CreateVpcEndpoint": {
+            "Type": "Task",
+            "Parameters": {
+              "VpcEndpointType": "Interface",
+              "ServiceName.$": "$.DescribeVpcEndpointServicesResult.vpce[0]",
+              "VpcId.$": "$.VpcId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createVpcEndpoint",
+            "End": true,
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "ErrorCheck in ForEachVpc Loop"
+              }
+            ]
+          },
+          "ForeachEndpoint": {
+            "Type": "Map",
+            "End": true,
+            "Iterator": {
+              "StartAt": "ServiceName = ec2?",
+              "States": {
+                "ServiceName = ec2?": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Not": {
+                        "Variable": "$.ServiceName",
+                        "StringEquals": "com.amazonaws.us-west-2.ec2"
+                      },
+                      "Next": "DescribeVpcEndpointServices ForeachEndpoint Loop"
+                    }
+                  ],
+                  "Default": "No Change Required"
+                },
+                "Catch all in ForeachEndpoint Loop": {
+                  "Type": "Fail"
+                },
+                "DescribeVpcEndpointServices ForeachEndpoint Loop": {
+                  "Type": "Task",
+                  "Next": "CreateVpcEndpointForEC2Service",
+                  "Parameters": {},
+                  "Resource": "arn:aws:states:::aws-sdk:ec2:describeVpcEndpointServices",
+                  "ResultSelector": {
+                    "vpce.$": "$.ServiceNames[?(@ =~ /.*ec2$/i)]"
+                  },
+                  "ResultPath": "$.DescribeVpcEndpointServicesResult",
+                  "Catch": [
+                    {
+                      "ErrorEquals": [
+                        "States.ALL"
+                      ],
+                      "Next": "ErrorCheck in ForeachEndpoint loop"
+                    }
+                  ]
+                },
+                "CreateVpcEndpointForEC2Service": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "VpcEndpointType": "Interface",
+                    "ServiceName.$": "$.DescribeVpcEndpointServicesResult.vpce",
+                    "VpcId.$": "$.VpcId"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:ec2:createVpcEndpoint",
+                  "End": true,
+                  "Catch": [
+                    {
+                      "ErrorEquals": [
+                        "States.ALL"
+                      ],
+                      "Next": "ErrorCheck in ForeachEndpoint loop"
+                    }
+                  ]
+                },
+                "ErrorCheck in ForeachEndpoint loop": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.Cause",
+                      "StringMatches": "*not authorized*",
+                      "Next": "Acess Denied In ForeachEndpoint Loop"
+                    }
+                  ],
+                  "Default": "Catch all in ForeachEndpoint Loop"
+                },
+                "Acess Denied In ForeachEndpoint Loop": {
+                  "Type": "Fail"
+                },
+                "No Change Required": {
+                  "Type": "Succeed"
+                }
+              }
+            },
+            "ItemsPath": "$.DescribeVpcEndpoints.VpcEndpoints",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Catch all in ForEachVPC loop"
+              }
+            ]
+          }
+        }
+      },
+      "ItemsPath": "$.Vpcs",
+      "End": true,
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Checker"
+        }
+      ]
+    }
+  }
+}

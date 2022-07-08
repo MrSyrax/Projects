@@ -1,0 +1,167 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeVpcs",
+  "States": {
+    "DescribeVpcs": {
+      "Type": "Task",
+      "Next": "For Each VPC ID",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeVpcs",
+      "ResultPath": "$.DescribeVpcsResult",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "For Each VPC ID": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "CreateLogGroup",
+        "States": {
+          "CreateLogGroup": {
+            "Type": "Task",
+            "Parameters": {
+              "LogGroupName.$": "$.VpcId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:cloudwatchlogs:createLogGroup",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "CloudWatchLogs.ResourceAlreadyExistsException"
+                ],
+                "Next": "Group Already Exists"
+              },
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Catch All in ForEachVPCID"
+              }
+            ],
+            "ResultPath": "$.CreateLogGroupResult",
+            "End": true
+          },
+          "Catch All in ForEachVPCID": {
+            "Type": "Fail"
+          },
+          "Group Already Exists": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "ItemsPath": "$.DescribeVpcsResult.Vpcs",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "CloudWatchLogs.ResourceAlreadyExistsException"
+          ],
+          "Next": "Catch All"
+        }
+      ],
+      "ResultPath": "$.LoopResult",
+      "Next": "CreateVPCFlowLogPerVPCID"
+    },
+    "CreateVPCFlowLogPerVPCID": {
+      "Type": "Map",
+      "Iterator": {
+        "StartAt": "CreateRole",
+        "States": {
+          "CreateRole": {
+            "Type": "Task",
+            "Next": "CreateVPCFlowLogs",
+            "Parameters": {
+              "AssumeRolePolicyDocument": "{\n    \"Version\": \"2012-10-17\",\n    \"Statement\": [\n        {\n            \"Effect\": \"Allow\",\n            \"Principal\": {\n                \"Service\": \"ec2.amazonaws.com\"\n            },\n            \"Action\": \"sts:AssumeRole\"\n        }\n    ]\n}",
+              "RoleName.$": "$.VpcId"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:iam:createRole",
+            "ResultPath": "$.CreateRoleResult",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "Iam.EntityAlreadyExistsException"
+                ],
+                "ResultPath": "$",
+                "Next": "CreateVPCFlowLogs"
+              },
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Choice"
+              }
+            ]
+          },
+          "Choice": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in CreateVPCFlowLog Loop"
+              }
+            ],
+            "Default": "Catch All in CreateVPCFlowLog Loop"
+          },
+          "Access Denied in CreateVPCFlowLog Loop": {
+            "Type": "Fail"
+          },
+          "CreateVPCFlowLogs": {
+            "Type": "Task",
+            "Parameters": {
+              "ResourceIds.$": "States.Array($.VpcId)",
+              "ResourceType": "VPC",
+              "TrafficType": "REJECT",
+              "LogGroupName.$": "$.VpcId",
+              "DeliverLogsPermissionArn.$": "$.CreateRoleResult.Role.Arn"
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:createFlowLogs",
+            "End": true,
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Choice"
+              }
+            ]
+          },
+          "Catch All in CreateVPCFlowLog Loop": {
+            "Type": "Fail"
+          }
+        }
+      },
+      "ItemsPath": "$.DescribeVpcsResult.Vpcs",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "CloudWatchLogs.ResourceAlreadyExistsException"
+          ],
+          "Next": "Catch All"
+        }
+      ],
+      "ResultPath": "$.LoopResult",
+      "End": true
+    },
+    "Catch All": {
+      "Type": "Fail"
+    }
+  }
+}

@@ -1,0 +1,292 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "DescribeSecurityGroups",
+  "States": {
+    "Catch All": {
+      "Type": "Fail"
+    },
+    "DescribeSecurityGroups": {
+      "Type": "Task",
+      "Parameters": {},
+      "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroups",
+      "Next": "LoopThroughSecurityGroups",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Error Check"
+        }
+      ]
+    },
+    "Error Check": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.Cause",
+          "StringMatches": "*not authorized*",
+          "Next": "Access Denied"
+        }
+      ],
+      "Default": "Catch All"
+    },
+    "Access Denied": {
+      "Type": "Fail"
+    },
+    "LoopThroughSecurityGroups": {
+      "Type": "Map",
+      "End": true,
+      "Iterator": {
+        "StartAt": "CheckIfIpRangesExistsand0.0.0.0/0",
+        "States": {
+          "CheckIfIpRangesExistsand0.0.0.0/0": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "And": [
+                  {
+                    "Variable": "$.IpPermissions[0].IpRanges",
+                    "IsPresent": true
+                  },
+                  {
+                    "Variable": "$.IpPermissions[0].IpRanges[0].CidrIp",
+                    "StringEquals": "0.0.0.0/0"
+                  }
+                ],
+                "Next": "DescribeSecurityGroupRules"
+              }
+            ],
+            "Default": "NoRangeExistsNoChangesNeeded"
+          },
+          "DescribeSecurityGroupRules": {
+            "Type": "Task",
+            "Next": "LoopThroughRules",
+            "Parameters": {
+              "Filters": [
+                {
+                  "Name": "group-id",
+                  "Values.$": "States.Array($.GroupId)"
+                }
+              ]
+            },
+            "Resource": "arn:aws:states:::aws-sdk:ec2:describeSecurityGroupRules",
+            "ResultPath": "$.GroupRulesResult",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Error Check in SG Loop"
+              }
+            ]
+          },
+          "Error Check in SG Loop": {
+            "Type": "Choice",
+            "Choices": [
+              {
+                "Variable": "$.Cause",
+                "StringMatches": "*not authorized*",
+                "Next": "Access Denied in SG Loop"
+              }
+            ],
+            "Default": "Catch all in SG Loop"
+          },
+          "Access Denied in SG Loop": {
+            "Type": "Fail"
+          },
+          "Catch all in SG Loop": {
+            "Type": "Fail"
+          },
+          "LoopThroughRules": {
+            "Type": "Map",
+            "Iterator": {
+              "StartAt": "CheckIfFromPortIsHighRisk",
+              "States": {
+                "CheckIfFromPortIsHighRisk": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Or": [
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 20
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 21
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 23
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 25
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 110
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 135
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 143
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 445
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 1433
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 1434
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 3000
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 3306
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 3389
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 4333
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 5000
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 5432
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 5500
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 5601
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 8080
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 8088
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 8888
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 9200
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": 9300
+                        },
+                        {
+                          "Variable": "$.FromPort",
+                          "NumericEquals": -1
+                        }
+                      ],
+                      "Next": "Is the rule Egress?"
+                    }
+                  ],
+                  "Default": "Ports are in allowed range"
+                },
+                "Is the rule Egress?": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.IsEgress",
+                      "BooleanEquals": true,
+                      "Next": "RuleIsEgress"
+                    }
+                  ],
+                  "Default": "RevokeSecurityGroupIngress"
+                },
+                "RuleIsEgress": {
+                  "Type": "Succeed"
+                },
+                "RevokeSecurityGroupIngress": {
+                  "Type": "Task",
+                  "Parameters": {
+                    "GroupId.$": "$.GroupId",
+                    "SecurityGroupRuleIds.$": "States.Array($.SecurityGroupRuleId)"
+                  },
+                  "Resource": "arn:aws:states:::aws-sdk:ec2:revokeSecurityGroupIngress",
+                  "Catch": [
+                    {
+                      "ErrorEquals": [
+                        "States.ALL"
+                      ],
+                      "Next": "Error Check in SG Rules Loop"
+                    }
+                  ],
+                  "End": true
+                },
+                "Error Check in SG Rules Loop": {
+                  "Type": "Choice",
+                  "Choices": [
+                    {
+                      "Variable": "$.Cause",
+                      "StringMatches": "*not authorized*",
+                      "Next": "Access Denied in SG Rules Loop"
+                    }
+                  ],
+                  "Default": "Catch all in SG Rules Loop"
+                },
+                "Access Denied in SG Rules Loop": {
+                  "Type": "Fail"
+                },
+                "Catch all in SG Rules Loop": {
+                  "Type": "Fail"
+                },
+                "Ports are in allowed range": {
+                  "Type": "Succeed"
+                }
+              }
+            },
+            "End": true,
+            "ItemsPath": "$.GroupRulesResult.SecurityGroupRules",
+            "Catch": [
+              {
+                "ErrorEquals": [
+                  "States.ALL"
+                ],
+                "Next": "Catch all in SG Loop"
+              }
+            ]
+          },
+          "NoRangeExistsNoChangesNeeded": {
+            "Type": "Succeed"
+          }
+        }
+      },
+      "ItemsPath": "$.SecurityGroups",
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "Catch All"
+        }
+      ]
+    }
+  }
+}
